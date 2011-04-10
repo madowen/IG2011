@@ -3,121 +3,143 @@
  *
  *  Created by Vicenc Gasco (vicenc.gasco@gmail.com) on 4/10/11.
  */
-
 #include "ImageProcessor.h"
 
-#define COLOR_RATIO (255.0/65535.0)
+#define COLOR_RATIO (255.0/65535.0) 
 
-/* ERROR CODES (Base: 100)
- * 101: There is not an image loaded.
- * 102: Image values are not defined.
- * 103: Given row index is out of the image range.
- * 104: Given column index is out of the image range.
- * 102: Image energies are not defined.
- */
-
-ImageProcessor::ImageProcessor() {
-	image = NULL;
-	pixelValues = NULL;
-	pixelEnergies = NULL;
-	pixelAccumuledEnergies = NULL;
-	processed = false;
-}
+using namespace std; 
+using namespace Magick;
 
 ImageProcessor::ImageProcessor(char * imgfile) {
-	ImageProcessor();
-	processed = false; // Define that the image is not processed,
-	image(imgfile);    // load the image,
-	processImage();    // and try to process it.
+	Image img(imgfile);		// Load the image,
+	image = &img;			// keep a reference to it,
+	
+	rows = image->rows();
+	cols = image->columns();
+	
+	pixelValues = new float [rows*cols];
+	pixelEnergies = new float [rows*cols];
+	pixelAccumuledEnergies = new float [rows*cols];
+	
+	processImage();			// and try to process it.
 }
 
 ImageProcessor::~ImageProcessor() {
-	free(pixelValues);
-	free(pixelEnergies);
-	free(pixelAccumuledEnergies);
-	free(image);
+	//delete [] pixelValues;
+	//delete pixelEnergies;
+	//delete pixelAccumuledEnergies;
 }
 
-int ImageProcessor::rows() {
+int ImageProcessor::getRows() {
 	return rows;
 };
 
-int ImageProcessor::cols() {
+int ImageProcessor::getCols() {
 	return cols;
 };
 
 void ImageProcessor::processImage() {
-	try {
-		gatherSize();
-		gatherPixelValues();
-		gatherPixelEnergies();
-		gatherPixelAccumuledEnergies();
-		processed = true;
-	} catch (int e)	{
-		processed = false;
-		cout << "An exception occurred. Exception Nr. " << e << endl;
-		exit(1);
+	gatherPixelValues();
+	gatherPixelEnergies();
+	gatherPixelAccumuledEnergies();
+}
+
+float ImageProcessor::getPixelValue(int i, int j) {
+	if (i < 0 || j < 0 || j >= cols || i >= rows ) {
+		return 0.0;
 	}
+	return (*(pixelValues+i*cols+j));
 }
 
-bool ImageProcessor::isProcessed() {
-	return processed;
+float ImageProcessor::getPixelEnergy(int i, int j) {
+	if (i < 0 || j < 0 || j >= cols || i >= rows ) {
+		return 0.0;
+	}
+	return (*(pixelEnergies+i*cols+j));
 }
 
-double ImageProcessor::getPixelValue(int i, int j) {
-	if (pixelValues == NULL) throw 102;
-	
-	if (i >= rows) throw 103;
-	if (j >= cols) throw 104;
-	
-	return (*(pixelValues+i*rows+j));
-}
-
-double ImageProcessor::getPixelEnergy(int i, int j) {
-	return 0.0;
-}
-
-double ImageProcessor::getPixelAccumuledEnergy(int i, int j) {
-	return 0.0;
-}
-
-void ImageProcessor::gatherSize() {
-	if (image == NULL) throw 101;
-	
-	rows = image.rows();
-	cols = image.columns();
-	
+float ImageProcessor::getPixelAccumuledEnergy(int i, int j) {
+	if (j < 0 || j >= cols) {
+		return 999999; //we return a value over 255, which is the max energy, and then this energy won't be selected.
+	}
+	if (i < 0) {
+		return 0;
+	}
+	return (*(pixelAccumuledEnergies+i*cols+j));
 }
 
 void ImageProcessor::gatherPixelValues() {
-	if (image == NULL) throw 101;
-	
-	free(pixelValues);
-	pixelValues = (double*) malloc(sizeof(double)*rows*cols);
-	
-	for(int i = 0; i < this.rows; i++) {
+	for(int i = 0; i < rows; i++) {
 		for(int j = 0; j < cols; j++) {
-			*(pixelValues+i*rows+j) = 0;
-			*(pixelValues+i*rows+j) += COLOR_RATIO*(image.pixelColor(j,i)).redQuantum();
-			*(pixelValues+i*rows+j) += COLOR_RATIO*(image.pixelColor(j,i)).greenQuantum();
-			*(pixelValues+i*rows+j) += COLOR_RATIO*(image.pixelColor(j,i)).blueQuantum();
-			*(pixelValues+i*rows+j) /= 3;
+			*(pixelValues+i*cols+j) = 0;
+			*(pixelValues+i*cols+j) += (float)COLOR_RATIO*(image->pixelColor(j,i)).redQuantum();
+			*(pixelValues+i*cols+j) += (float)COLOR_RATIO*(image->pixelColor(j,i)).greenQuantum();
+			*(pixelValues+i*cols+j) += (float)COLOR_RATIO*(image->pixelColor(j,i)).blueQuantum();
+			*(pixelValues+i*cols+j) /= 3.0;
 		}
 	}
-	
 }
 
 void ImageProcessor::gatherPixelEnergies() {
-	if (image == NULL) throw 101;
-	if (pixelValues == NULL) throw 102;
+	// Only to get process output
+	float max = 0;
+	// --
 	
-	free(pixelEnergies);
-	pixelEnergies = (double*) malloc(sizeof(double)*rows*cols);
+	for(int i = 0; i < rows; i++) {
+		for(int j = 0; j < cols; j++) {
+			*(pixelEnergies+i*cols+j) = 0;
+			*(pixelEnergies+i*cols+j) += fabs( (getPixelValue(i+1,j) - getPixelValue(i-1,j)) / 2.0 );
+			*(pixelEnergies+i*cols+j) += fabs( (getPixelValue(i,j+1) - getPixelValue(i,j-1)) / 2.0 );
+			// Only to get process output
+			if (*(pixelEnergies+i*cols+j) > max) {
+				max = *(pixelEnergies+i*cols+j);
+			}
+			// --
+		}
+	}
 	
+	// Only to get process output
+	Geometry geom(cols,rows);
+	Image im(geom,"white");
+	float r = 65535.0/max;
+	for(int i = 0; i < rows; i++) {
+		for(int j = 0; j < cols; j++) {
+			Color col((int)r*(*(pixelEnergies+i*cols+j)),(int)r*(*(pixelEnergies+i*cols+j)),(int)r*(*(pixelEnergies+i*cols+j)));
+			im.pixelColor(j, i,	col);
+		}
+	}
+	im.write("energy.jpg");
+	// --
 }
 
 void ImageProcessor::gatherPixelAccumuledEnergies() {
-	if (image == NULL) throw 101;
-	if (pixelEnergies == NULL) throw 105;
+	// Only to get process output
+	float max = 0;
+	// --
 	
+	for(int i = 0; i < rows; i++) {
+		for(int j = 0; j < cols; j++) {
+			*(pixelAccumuledEnergies+i*cols+j) = 0;
+			*(pixelAccumuledEnergies+i*cols+j) += getPixelEnergy(i,j);
+			*(pixelAccumuledEnergies+i*cols+j) += min(getPixelAccumuledEnergy(i-1,j), min(getPixelAccumuledEnergy(i-1,j+1), getPixelAccumuledEnergy(i-1,j-1)));
+			// Only to get process output
+			if (*(pixelAccumuledEnergies+i*cols+j) > max) {
+				max = *(pixelAccumuledEnergies+i*cols+j);
+			}
+			// --
+		}
+	}
+	
+	// Only to get process output
+	Geometry geom(cols,rows);
+	Image im(geom,"white");
+	float r = 65535.0/max;
+	for(int i = 0; i < rows; i++) {
+		for(int j = 0; j < cols; j++) {
+			Color col((int)r*(*(pixelAccumuledEnergies+i*cols+j)),(int)r*(*(pixelAccumuledEnergies+i*cols+j)),(int)r*(*(pixelAccumuledEnergies+i*cols+j)));
+			im.pixelColor(j, i,	col);
+		}
+	}
+	im.write("accumuled_energy.jpg");
+	// --
 }
